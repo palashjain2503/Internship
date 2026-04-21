@@ -6,7 +6,10 @@ from flask import Flask, jsonify, request
 from agent import run_case_generation
 from db import add_version, create_case, get_case, get_latest_version, init_db, list_cases
 
+from faculty_live import faculty_live_bp
+
 app = Flask(__name__)
+app.register_blueprint(faculty_live_bp)
 init_db()
 
 
