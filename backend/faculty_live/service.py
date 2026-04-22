@@ -55,6 +55,7 @@ def create_session(request_origin, title=None, created_by="faculty"):
 def fetch_session(session_id):
     return get_session(session_id)
 
+
 def launch_session(session_id):
     session = get_session(session_id)
     if session is None:
