@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 
 from .schemas import error_response, parse_create_session_request, session_response
-from .service import create_session, fetch_session
+from .service import create_session, fetch_session, launch_session
 
 
 faculty_live_bp = Blueprint("faculty_live", __name__, url_prefix="/api/faculty-live")
@@ -28,4 +28,13 @@ def get_faculty_live_session(session_id):
     if session is None:
         return error_response("session not found", 404)
 
-    return jsonify(session_response(session)), 2
+    return jsonify(session_response(session)), 200
+
+
+@faculty_live_bp.route("/sessions/<session_id>/launch", methods=["POST"])
+def launch_faculty_live_session(session_id):
+    session = launch_session(session_id)
+    if session is None:
+        return error_response("session not found", 404)
+
+    return jsonify(session_response(session)), 200
