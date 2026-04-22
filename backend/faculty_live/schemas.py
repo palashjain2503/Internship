@@ -3,6 +3,8 @@ ALLOWED_FLOW_STATES = {
     "discussion",
 }
 
+DEFAULT_QUESTION_TYPE = "open_text"
+
 
 def parse_create_session_request(payload):
     payload = payload or {}
@@ -38,6 +40,42 @@ def parse_flow_state_request(payload):
     }
 
 
+def parse_create_question_request(payload):
+    payload = payload or {}
+
+    prompt = payload.get("prompt")
+    question_type = payload.get("type", DEFAULT_QUESTION_TYPE)
+
+    if prompt is None:
+        raise ValueError("prompt is required")
+
+    if not isinstance(prompt, str):
+        raise ValueError("prompt must be a string")
+
+    prompt = prompt.strip()
+    if not prompt:
+        raise ValueError("prompt is required")
+
+    if len(prompt) > 1000:
+        raise ValueError("prompt must be at most 1000 characters")
+
+    if question_type is None:
+        question_type = DEFAULT_QUESTION_TYPE
+
+    if not isinstance(question_type, str):
+        raise ValueError("type must be a string")
+
+    question_type = question_type.strip() or DEFAULT_QUESTION_TYPE
+
+    if question_type != DEFAULT_QUESTION_TYPE:
+        raise ValueError('type must be "open_text"')
+
+    return {
+        "prompt": prompt,
+        "type": DEFAULT_QUESTION_TYPE,
+    }
+
+
 def session_response(session):
     return {
         "ok": True,
@@ -52,6 +90,40 @@ def session_response(session):
             "updated_at": session["updated_at"],
             "qr_payload": session["qr_payload"],
         },
+    }
+
+
+def question_response(question):
+    return {
+        "ok": True,
+        "question": {
+            "question_id": question["question_id"],
+            "session_id": question["session_id"],
+            "prompt": question["prompt"],
+            "type": question["type"],
+            "status": question["status"],
+            "created_at": question["created_at"],
+            "updated_at": question["updated_at"],
+        },
+    }
+
+
+def question_list_response(session_id, questions):
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "questions": [
+            {
+                "question_id": question["question_id"],
+                "session_id": question["session_id"],
+                "prompt": question["prompt"],
+                "type": question["type"],
+                "status": question["status"],
+                "created_at": question["created_at"],
+                "updated_at": question["updated_at"],
+            }
+            for question in questions
+        ],
     }
 
 

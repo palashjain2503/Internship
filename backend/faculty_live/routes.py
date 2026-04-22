@@ -1,9 +1,16 @@
 from flask import Blueprint, jsonify, request
 
+from .question_service import (
+    create_question_for_session,
+    list_questions_for_existing_session,
+)
 from .schemas import (
     error_response,
+    parse_create_question_request,
     parse_create_session_request,
     parse_flow_state_request,
+    question_list_response,
+    question_response,
     session_response,
 )
 from .service import create_session, fetch_session, launch_session, update_flow_state
@@ -59,3 +66,30 @@ def update_faculty_live_flow_state(session_id):
         return error_response("flow_state can only be updated after launch", 400)
 
     return jsonify(session_response(session)), 200
+
+
+@faculty_live_bp.route("/sessions/<session_id>/questions", methods=["POST"])
+def create_faculty_live_question(session_id):
+    try:
+        data = parse_create_question_request(request.get_json(silent=True))
+        question = create_question_for_session(
+            session_id=session_id,
+            prompt=data["prompt"],
+            question_type=data["type"],
+        )
+    except ValueError as exc:
+        return error_response(str(exc), 400)
+    except LookupError as exc:
+        return error_response(str(exc), 404)
+
+    return jsonify(question_response(question)), 201
+
+
+@faculty_live_bp.route("/sessions/<session_id>/questions", methods=["GET"])
+def list_faculty_live_questions(session_id):
+    try:
+        questions = list_questions_for_existing_session(session_id)
+    except LookupError as exc:
+        return error_response(str(exc), 404)
+
+    return jsonify(question_list_response(session_id, questions)), 200
