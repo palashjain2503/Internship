@@ -44,6 +44,7 @@ def create_session(request_origin, title=None, created_by="faculty"):
         "title": (title or "Live Case Session").strip(),
         "created_by": created_by,
         "status": "created",
+        "flow_state": "waiting",
         "created_at": now,
         "updated_at": now,
         "qr_payload": qr_payload,
@@ -67,3 +68,19 @@ def launch_session(session_id):
     session["status"] = "live"
     session["updated_at"] = _utc_now_iso()
     return save_session(session)
+
+
+def update_flow_state(session_id, flow_state):
+    session = get_session(session_id)
+    if session is None:
+        return None, "not_found"
+
+    if session["status"] != "live":
+        return None, "session_not_live"
+
+    if session.get("flow_state") == flow_state:
+        return session, None
+
+    session["flow_state"] = flow_state
+    session["updated_at"] = _utc_now_iso()
+    return save_session(session), None
