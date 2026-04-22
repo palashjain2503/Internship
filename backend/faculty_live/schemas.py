@@ -1,3 +1,9 @@
+ALLOWED_FLOW_STATES = {
+    "waiting",
+    "discussion",
+}
+
+
 def parse_create_session_request(payload):
     payload = payload or {}
     title = payload.get("title")
@@ -15,6 +21,23 @@ def parse_create_session_request(payload):
     }
 
 
+def parse_flow_state_request(payload):
+    payload = payload or {}
+    flow_state = payload.get("flow_state")
+
+    if not isinstance(flow_state, str) or not flow_state.strip():
+        raise ValueError("flow_state must be a non-empty string")
+
+    flow_state = flow_state.strip()
+
+    if flow_state not in ALLOWED_FLOW_STATES:
+        raise ValueError("flow_state must be one of: waiting, discussion")
+
+    return {
+        "flow_state": flow_state,
+    }
+
+
 def session_response(session):
     return {
         "ok": True,
@@ -24,6 +47,7 @@ def session_response(session):
             "title": session["title"],
             "created_by": session["created_by"],
             "status": session["status"],
+            "flow_state": session.get("flow_state", "waiting"),
             "created_at": session["created_at"],
             "updated_at": session["updated_at"],
             "qr_payload": session["qr_payload"],
