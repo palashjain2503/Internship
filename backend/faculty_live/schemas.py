@@ -93,37 +93,18 @@ def session_response(session):
     }
 
 
-def question_response(question):
+def join_session_response(session):
     return {
         "ok": True,
-        "question": {
-            "question_id": question["question_id"],
-            "session_id": question["session_id"],
-            "prompt": question["prompt"],
-            "type": question["type"],
-            "status": question["status"],
-            "created_at": question["created_at"],
-            "updated_at": question["updated_at"],
+        "session": {
+            "session_id": session["session_id"],
+            "session_code": session["session_code"],
+            "title": session["title"],
+            "status": session["status"],
+            "flow_state": session.get("flow_state", "waiting"),
+            "created_at": session["created_at"],
+            "updated_at": session["updated_at"],
         },
-    }
-
-
-def question_list_response(session_id, questions):
-    return {
-        "ok": True,
-        "session_id": session_id,
-        "questions": [
-            {
-                "question_id": question["question_id"],
-                "session_id": question["session_id"],
-                "prompt": question["prompt"],
-                "type": question["type"],
-                "status": question["status"],
-                "created_at": question["created_at"],
-                "updated_at": question["updated_at"],
-            }
-            for question in questions
-        ],
     }
 
 
