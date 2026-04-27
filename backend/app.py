@@ -2,26 +2,31 @@ import traceback
 import uuid
 
 from flask import Flask, jsonify, request
+from flask_socketio import SocketIO
 
 from agent import run_case_generation
 from db import add_version, create_case, get_case, get_latest_version, init_db, list_cases
 from faculty_live import faculty_live_bp, faculty_live_join_bp
+from live_realtime import live_bp, init_live_tables, register_socket_handlers
 
 app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
+
 app.register_blueprint(faculty_live_bp)
 app.register_blueprint(faculty_live_join_bp)
-init_db()
+app.register_blueprint(live_bp)
 
+init_db()
+init_live_tables()
+register_socket_handlers(socketio)
 
 @app.get("/api/health")
 def health_check():
     return jsonify({"status": "ok", "service": "livecase-backend"})
 
-
 @app.get("/api/cases")
 def list_cases_endpoint():
     return jsonify({"items": list_cases()})
-
 
 @app.post("/api/cases")
 def create_case_endpoint():
@@ -30,7 +35,6 @@ def create_case_endpoint():
     create_case(case_id, payload)
     return jsonify({"id": case_id, "draft": payload})
 
-
 @app.get("/api/cases/<case_id>")
 def get_case_endpoint(case_id):
     case = get_case(case_id)
@@ -38,7 +42,6 @@ def get_case_endpoint(case_id):
         return jsonify({"error": "not_found"}), 404
     latest = get_latest_version(case_id)
     return jsonify({"case": case, "latest_version": latest})
-
 
 @app.post("/api/cases/<case_id>/generate")
 def generate_case_endpoint(case_id):
@@ -59,26 +62,21 @@ def generate_case_endpoint(case_id):
         app.logger.error(traceback.format_exc())
         return jsonify({"error": "generation_failed", "message": str(exc)}), 500
 
-
 @app.get("/api/sessions")
 def list_sessions():
     return jsonify({"status": "not_implemented", "items": []})
-
 
 @app.get("/api/sessions/<session_id>")
 def get_session(session_id):
     return jsonify({"status": "not_implemented", "session_id": session_id})
 
-
 @app.get("/api/questions")
 def list_questions():
     return jsonify({"status": "not_implemented", "items": []})
-
 
 @app.get("/api/analytics")
 def analytics_summary():
     return jsonify({"status": "not_implemented", "summary": {}})
 
-
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    socketio.run(app, debug=True, host="0.0.0.0", port=5050)
