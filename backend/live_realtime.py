@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import uuid
 from datetime import datetime
@@ -15,6 +16,11 @@ DB_PATH = "livecase.db"
 
 def now_iso():
     return datetime.utcnow().isoformat() + "Z"
+
+
+def build_join_url(session_id, frontend_base_url=None):
+    base = frontend_base_url or os.environ.get("FRONTEND_BASE_URL") or "http://localhost:5174"
+    return f"{base.rstrip('/')}/LiveCase.ai.html?session_id={session_id}"
 
 
 def get_db():
@@ -143,7 +149,8 @@ def create_live_session():
     conn.commit()
     conn.close()
 
-    join_url = f"http://localhost:5173/LiveCase.ai.html?session_id={session_id}"
+    frontend_base_url = payload.get("frontend_base_url")
+    join_url = build_join_url(session_id, frontend_base_url)
 
     return jsonify({
         "session_id": session_id,

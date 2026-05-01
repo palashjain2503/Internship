@@ -1,6 +1,8 @@
 // Student view  -  QR landing  -  read case  -  AI agent chat + live poll
 const { useState: useStateS, useEffect: useEffectS, useRef: useRefS, useMemo: useMemoS } = React;
 
+const getSessionId = () => new URLSearchParams(window.location.search).get("session_id") || "";
+
 // ===== JOIN SCREEN =====
 const StudentJoin = ({ onJoin, caseData }) => {
   const [name, setName] = useStateS("");
@@ -128,7 +130,7 @@ const StudentReader = ({ onConfirmRead, studentName, caseData }) => {
 };
 
 // ===== DISCUSSION (case + agent + live question) =====
-const StudentDiscussion = ({ studentName, sessionState, dispatch, studentId, caseData }) => {
+const StudentDiscussion = ({ studentName, sessionState, dispatch, studentId, caseData, sessionId }) => {
   const c = caseData;
   const liveQ = sessionState.questions.find(q => q.id === sessionState.activeQuestionId);
   const [agentOpen, setAgentOpen] = useStateS(true);
@@ -149,7 +151,7 @@ const StudentDiscussion = ({ studentName, sessionState, dispatch, studentId, cas
 
         <div style={{ padding: "24px 28px 60px", maxWidth: 720, margin: "0 auto" }}>
           {liveQ && liveQ.status !== "draft" && (
-            <StudentLiveQuestion q={liveQ} dispatch={dispatch} studentId={studentId} answers={sessionState.answers[liveQ.id] || []} results={sessionState.results[liveQ.id]} attendance={sessionState.attendance} />
+            <StudentLiveQuestion q={liveQ} dispatch={dispatch} studentId={studentId} sessionId={sessionId} answers={sessionState.answers[liveQ.id] || []} results={sessionState.results[liveQ.id]} attendance={sessionState.attendance} />
           )}
 
           <div className="doc" style={{ padding: "40px 48px", marginTop: liveQ ? 24 : 0 }}>
@@ -173,7 +175,7 @@ const StudentDiscussion = ({ studentName, sessionState, dispatch, studentId, cas
 };
 
 // ===== LIVE QUESTION CARD (student) =====
-const StudentLiveQuestion = ({ q, dispatch, studentId, answers, results, attendance }) => {
+const StudentLiveQuestion = ({ q, dispatch, studentId, answers, results, attendance, sessionId }) => {
   const [selected, setSelected] = useStateS([]);
   const [openText, setOpenText] = useStateS("");
   const myAnswer = answers.find(a => a.studentId === studentId);
@@ -181,12 +183,32 @@ const StudentLiveQuestion = ({ q, dispatch, studentId, answers, results, attenda
   const revealed = q.status === "revealed";
 
   const submit = () => {
+    const currentSessionId = sessionId || getSessionId();
+    if (!currentSessionId) {
+      console.warn("Missing session_id in URL query string");
+      return;
+    }
+
     if (q.kind === "poll") {
       if (selected.length === 0) return;
+      const answer = selected;
+      window.socket?.emit("submit_answer", {
+        session_id: currentSessionId,
+        question_id: q.id,
+        user_id: studentId,
+        answer
+      });
       dispatch({ type: "answer", qid: q.id, answer: { studentId, choices: selected } });
     } else {
-      if (!openText.trim()) return;
-      dispatch({ type: "answer", qid: q.id, answer: { studentId, text: openText } });
+      const text = openText.trim();
+      if (!text) return;
+      window.socket?.emit("submit_answer", {
+        session_id: currentSessionId,
+        question_id: q.id,
+        user_id: studentId,
+        answer: text
+      });
+      dispatch({ type: "answer", qid: q.id, answer: { studentId, text } });
     }
   };
 
@@ -442,9 +464,28 @@ const Bubble = ({ role, text }) => {
 
 // ===== STUDENT ROOT =====
 const StudentView = ({ stage, setStage, studentName, setStudentName, sessionState, dispatch, studentId, caseData }) => {
-  if (stage === "join") return <StudentJoin caseData={caseData} onJoin={(n) => { setStudentName(n); setStage("read"); }} />;
+  const sessionId = useMemoS(() => getSessionId(), []);
+  const socket = window.socket;
+
+  const handleJoin = (name) => {
+    const normalized = name?.trim() || "Guest";
+    if (!sessionId) {
+      console.warn("Missing session_id in URL query string");
+      return;
+    }
+    socket?.emit("join_session", {
+      session_id: sessionId,
+      user_id: studentId,
+      name: normalized,
+      role: "student"
+    });
+    setStudentName(normalized);
+    setStage("read");
+  };
+
+  if (stage === "join") return <StudentJoin caseData={caseData} onJoin={handleJoin} />;
   if (stage === "read") return <StudentReader caseData={caseData} studentName={studentName} onConfirmRead={() => setStage("discuss")} />;
-  if (stage === "discuss") return <StudentDiscussion caseData={caseData} studentName={studentName} studentId={studentId} sessionState={sessionState} dispatch={dispatch} />;
+  if (stage === "discuss") return <StudentDiscussion caseData={caseData} studentName={studentName} studentId={studentId} sessionState={sessionState} dispatch={dispatch} sessionId={sessionId} />;
   return null;
 };
 

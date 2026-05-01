@@ -411,12 +411,20 @@ const CasePreview = ({ onPublish, onBack, caseData }) => {
 };
 
 // ===== LIVE CONTROL =====
-const LiveControl = ({ sessionState, dispatch, caseData }) => {
+const LiveControl = ({ sessionState, dispatch, caseData, sessionId }) => {
   const { questions, attendance, results, activeQuestionId, answers } = sessionState;
   const [tab, setTab] = useStateF("questions");
   const [composeOpen, setComposeOpen] = useStateF(false);
 
   const c = caseData;
+
+  const endSession = () => {
+    if (!sessionId) {
+      console.warn("No sessionId available for teacher_end_session");
+      return;
+    }
+    window.socket?.emit("teacher_end_session", { session_id: sessionId });
+  };
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", height: "100%", minHeight: 0 }}>
@@ -432,7 +440,7 @@ const LiveControl = ({ sessionState, dispatch, caseData }) => {
           </div>
           <div className="flex items-center gap-2">
             <Btn variant="ghost" size="sm" icon="qr">Show QR</Btn>
-            <Btn variant="ghost" size="sm" icon="x">End session</Btn>
+            <Btn variant="ghost" size="sm" icon="x" onClick={endSession}>End session</Btn>
           </div>
         </div>
 
@@ -455,7 +463,7 @@ const LiveControl = ({ sessionState, dispatch, caseData }) => {
 
             <div className="flex col gap-3">
               {questions.map(q => (
-                <QuestionCard key={q.id} q={q} dispatch={dispatch} answers={answers[q.id] || []} results={results[q.id]} attendance={attendance} activeQuestionId={activeQuestionId} />
+                <QuestionCard key={q.id} q={q} dispatch={dispatch} answers={answers[q.id] || []} results={results[q.id]} attendance={attendance} activeQuestionId={activeQuestionId} sessionId={sessionId} />
               ))}
               {composeOpen && (
                 <ComposeQuestion onCancel={() => setComposeOpen(false)} onAdd={(nq) => { dispatch({ type: "addQuestion", q: nq }); setComposeOpen(false); }} />
@@ -486,11 +494,44 @@ const LiveControl = ({ sessionState, dispatch, caseData }) => {
   );
 };
 
-const QuestionCard = ({ q, dispatch, answers, results, attendance, activeQuestionId }) => {
+const QuestionCard = ({ q, dispatch, answers, results, attendance, activeQuestionId, sessionId }) => {
   const respCount = answers.length;
   const pct = Math.round((respCount / attendance) * 100);
   const isLive = q.status === "live";
   const isRevealed = q.status === "revealed";
+
+  const pushLive = () => {
+    if (!sessionId) {
+      console.warn("No sessionId available for teacher_new_question");
+      return;
+    }
+    const payload = {
+      session_id: sessionId,
+      question_id: q.id,
+      kind: q.kind,
+      prompt: q.prompt,
+      options: q.options || [],
+      multi_select: !!q.multi
+    };
+    window.socket?.emit("teacher_new_question", payload);
+    dispatch({ type: "pushLive", id: q.id });
+  };
+
+  const releaseAnswers = () => {
+    if (!sessionId) {
+      console.warn("No sessionId available for teacher_reveal_results");
+      return;
+    }
+    window.socket?.emit("teacher_lock_question", {
+      session_id: sessionId,
+      question_id: q.id
+    });
+    window.socket?.emit("teacher_reveal_results", {
+      session_id: sessionId,
+      question_id: q.id
+    });
+    dispatch({ type: "reveal", id: q.id });
+  };
 
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden", borderColor: isLive ? "var(--ochre)" : "var(--rule)" }}>
@@ -505,12 +546,12 @@ const QuestionCard = ({ q, dispatch, answers, results, attendance, activeQuestio
         </div>
         <div className="flex items-center gap-2">
           {!isLive && !isRevealed && q.status === "draft" && (
-            <Btn size="sm" variant="ochre" icon="bolt" onClick={() => dispatch({ type: "pushLive", id: q.id })}>Push live</Btn>
+            <Btn size="sm" variant="ochre" icon="bolt" onClick={pushLive}>Push live</Btn>
           )}
           {isLive && (
             <>
               <span className="mono text-xs dim">{respCount} / {attendance}</span>
-              <Btn size="sm" variant="sage" icon="eye" onClick={() => dispatch({ type: "reveal", id: q.id })}>Release answers</Btn>
+              <Btn size="sm" variant="sage" icon="eye" onClick={releaseAnswers}>Release answers</Btn>
             </>
           )}
           {isRevealed && <Btn size="sm" variant="ghost">View</Btn>}
@@ -668,46 +709,122 @@ const ActivityItem = ({ icon, color, text, time }) => (
 
 // ===== FACULTY ROOT =====
 const FacultyView = ({ stage, setStage, draft, setDraft, sessionState, dispatch, onGenerateCase, generateError, caseData, onOpenDraft, generateReady, generateLogs }) => {
+  const [liveSession, setLiveSession] = useStateF({ sessionId: "", joinUrl: "", qrUrl: "", loading: true, error: null });
+
   if (stage === "create") return <CreateCase draft={draft} setDraft={setDraft} onGenerate={onGenerateCase} error={generateError} />;
   if (stage === "generating") return <Generating draft={draft} onDone={onOpenDraft} isReady={generateReady} logs={generateLogs} />;
   if (stage === "preview") return <CasePreview caseData={caseData} onPublish={() => setStage("share")} onBack={() => setStage("create")} />;
-  if (stage === "share") return <ShareScreen onStart={() => setStage("live")} onBack={() => setStage("preview")} />;
-  if (stage === "live") return <LiveControl caseData={caseData} sessionState={sessionState} dispatch={dispatch} />;
+  if (stage === "share") return <ShareScreen caseData={caseData} liveSession={liveSession} setLiveSession={setLiveSession} onStart={() => setStage("live")} onBack={() => setStage("preview")} />;
+  if (stage === "live") return <LiveControl caseData={caseData} sessionState={sessionState} dispatch={dispatch} sessionId={liveSession.sessionId} />;
   return null;
 };
 
-const ShareScreen = ({ onStart, onBack }) => (
-  <div style={{ padding: "36px 36px 80px", maxWidth: 920, margin: "0 auto" }}>
-    <button onClick={onBack} className="btn ghost sm"><Icon name="chevL" size={12} /> Back</button>
-    <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "1fr 320px", gap: 28 }}>
-      <div>
-        <h1 className="serif" style={{ fontSize: 30, margin: "0 0 10px" }}>Share your case</h1>
-        <p style={{ color: "var(--ink-3)", maxWidth: 520, lineHeight: 1.6 }}>
-          Students join instantly with a QR code. You control when questions go live and when results are released.
-        </p>
-        <div className="card" style={{ padding: 16, marginTop: 20 }}>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>Join URL</div>
-          <div className="flex items-center gap-2">
-            <input className="input" value="livecase.ai/room/HL-621" readOnly />
-            <Btn variant="ghost" size="sm" icon="link">Copy</Btn>
+const ShareScreen = ({ onStart, onBack, caseData, liveSession, setLiveSession }) => {
+  const { sessionId, joinUrl, qrUrl, loading, error } = liveSession;
+
+  useEffectF(() => {
+    if (sessionId) return;
+
+    const createLiveSession = async () => {
+      setLiveSession(prev => ({ ...prev, loading: true, error: null }));
+      try {
+        const res = await fetch("/api/live/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: caseData.title || "Live session",
+            teacher_name: caseData.instructor || "Instructor",
+            frontend_base_url: window.location.origin
+          })
+        });
+        if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);
+        const data = await res.json();
+        setLiveSession({
+          sessionId: data.session_id,
+          joinUrl: data.join_url,
+          qrUrl: `https://quickchart.io/qr?text=${encodeURIComponent(data.join_url)}&size=220`,
+          loading: false,
+          error: null
+        });
+      } catch (err) {
+        setLiveSession(prev => ({ ...prev, loading: false, error: err.message || "Unable to fetch join link" }));
+      }
+    };
+
+    createLiveSession();
+  }, [sessionId, caseData.title, caseData.instructor, setLiveSession]);
+
+  const copyLink = async () => {
+    if (!joinUrl) return;
+    try {
+      await navigator.clipboard.writeText(joinUrl);
+      alert("Join link copied");
+    } catch (e) {
+      alert("Could not copy link");
+    }
+  };
+
+  return (
+    <div style={{ padding: "36px 36px 80px", maxWidth: 920, margin: "0 auto" }}>
+      <button onClick={onBack} className="btn ghost sm">
+        <Icon name="chevL" size={12} /> Back
+      </button>
+
+      <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "1fr 320px", gap: 28 }}>
+        <div>
+          <h1 className="serif" style={{ fontSize: 30, margin: "0 0 10px" }}>Share your case</h1>
+          <p style={{ color: "var(--ink-3)", maxWidth: 520, lineHeight: 1.6 }}>
+            Students join instantly with a QR code. You control when questions go live and when results are released.
+          </p>
+
+          <div className="card" style={{ padding: 16, marginTop: 20 }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Join URL</div>
+            <div className="flex items-center gap-2">
+              <input className="input" value={joinUrl || (loading ? "Generating join link..." : "Unable to generate link")} readOnly />
+              <Btn variant="ghost" size="sm" icon="link" onClick={copyLink} disabled={!joinUrl}>Copy</Btn>
+            </div>
+            {error && <div className="mono dim" style={{ fontSize: 11, marginTop: 8, color: "var(--terra)" }}>{error}</div>}
+          </div>
+
+          <div className="card" style={{ padding: 16, marginTop: 14 }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Start session</div>
+            <div className="flex items-center justify-between">
+              <div className="mono dim text-xs">Room opens when you start.</div>
+              <Btn variant="ochre" icon="bolt" onClick={onStart} disabled={!sessionId || loading}>Go live</Btn>
+            </div>
           </div>
         </div>
-        <div className="card" style={{ padding: 16, marginTop: 14 }}>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>Start session</div>
-          <div className="flex items-center justify-between">
-            <div className="mono dim text-xs">Room opens when you start.</div>
-            <Btn variant="ochre" icon="bolt" onClick={onStart}>Go live</Btn>
+
+        <div className="card" style={{ padding: 18, textAlign: "center" }}>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>QR join</div>
+
+          <a href={joinUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
+            <img
+              src={qrUrl}
+              alt="Session QR Code"
+              style={{ width: 220, height: 220, borderRadius: 8, border: "1px solid var(--rule)" }}
+            />
+          </a>
+
+          <div className="mono dim" style={{ fontSize: 10, marginTop: 10 }}>
+            Scan from phone or click QR to open join link
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <a
+              href={joinUrl}
+              target="_blank"
+              rel="noreferrer"
+              style={{ fontSize: 12, color: "var(--ochre-ink)", wordBreak: "break-all" }}
+            >
+              {joinUrl}
+            </a>
           </div>
         </div>
-      </div>
-      <div className="card" style={{ padding: 18, textAlign: "center" }}>
-        <div className="eyebrow" style={{ marginBottom: 10 }}>QR join</div>
-        <QR label="HL-621" />
-        <div className="mono dim" style={{ fontSize: 10, marginTop: 10 }}>Scan to join in 5 seconds</div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 Object.assign(window, { FacultyView });
 

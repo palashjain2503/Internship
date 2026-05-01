@@ -58,10 +58,13 @@ function sessionReducer(state, action) {
       };
     }
     case "addQuestion": {
-      // auto-push live
+      const normalizedStatus = (action.q.status || "live").toLowerCase();
+      const existing = state.questions.find(q => q.id === action.q.id);
       return {
         ...state,
-        questions: [...state.questions, { ...action.q, status: "live" }],
+        questions: existing
+          ? state.questions.map(q => q.id === action.q.id ? { ...q, ...action.q, status: normalizedStatus } : q)
+          : [...state.questions, { ...action.q, status: normalizedStatus }],
         activeQuestionId: action.q.id
       };
     }
@@ -123,6 +126,32 @@ function sessionReducer(state, action) {
       }
       return { ...state, answers: nextAnswers, results: nextResults };
     }
+    case "setSessionSnapshot": {
+      const questions = (action.session?.questions || []).map(q => ({
+        id: q.question_id || q.id,
+        question_id: q.question_id || q.id,
+        kind: q.kind,
+        prompt: q.prompt,
+        options: q.options || [],
+        multi: q.multi_select || q.multi,
+        status: (q.status || "draft").toLowerCase()
+      }));
+      return {
+        ...state,
+        attendance: action.session?.participant_count || state.attendance,
+        questions,
+        activeQuestionId: action.currentQuestion?.question_id || state.activeQuestionId
+      };
+    }
+    case "userJoined":
+      return { ...state, attendance: action.participant_count || state.attendance };
+    case "setResults":
+      return { ...state, results: { ...state.results, [action.qid]: action.results } };
+    case "updateQuestionStatus":
+      return {
+        ...state,
+        questions: state.questions.map(q => q.id === action.qid ? { ...q, status: action.status } : q)
+      };
     default: return state;
   }
 }
@@ -341,6 +370,9 @@ const App = () => {
   const [sessionState, dispatch] = useReducerA(sessionReducer, null, initialSession);
   useAutoSimulate(sessionState, dispatch);
 
+  const [socket, setSocket] = useStateA(null);
+  const [socketConnected, setSocketConnected] = useStateA(false);
+
   const studentId = "s1";
   const [studentName, setStudentName] = useStateA("Aarav K.");
   const [generateError, setGenerateError] = useStateA("");
@@ -357,12 +389,94 @@ const App = () => {
   const setTheme = v => { setThemeRaw(v); window.parent.postMessage({ type: "__edit_mode_set_keys", edits: { theme: v } }, "*"); };
   const setSplit = v => { setSplitRaw(v); window.parent.postMessage({ type: "__edit_mode_set_keys", edits: { split: v } }, "*"); };
 
+  useEffectA(() => {
+    if (window.socket) {
+      setSocket(window.socket);
+      setSocketConnected(window.socket.connected);
+      return;
+    }
+
+    if (typeof window.io !== "function") {
+      console.warn("Socket.IO client not available on window.io");
+      return;
+    }
+
+    const sock = window.io({ path: "/socket.io", transports: ["websocket"] });
+    window.socket = sock;
+    setSocket(sock);
+
+    sock.on("connect", () => {
+      setSocketConnected(true);
+      console.info("socket connected", sock.id);
+    });
+
+    sock.on("disconnect", () => {
+      setSocketConnected(false);
+      console.info("socket disconnected");
+    });
+
+    sock.on("session_snapshot", ({ session, current_question }) => {
+      dispatch({ type: "setSessionSnapshot", session, currentQuestion: current_question });
+    });
+
+    sock.on("user_joined", ({ participant_count }) => {
+      dispatch({ type: "userJoined", participant_count });
+    });
+
+    sock.on("new_question", ({ question }) => {
+      dispatch({
+        type: "addQuestion",
+        q: {
+          ...question,
+          id: question.question_id || question.id,
+          multi: question.multi_select || question.multi,
+          status: (question.status || "live").toLowerCase()
+        }
+      });
+    });
+
+    sock.on("answer_received", ({ question_id, distribution }) => {
+      dispatch({ type: "setResults", qid: question_id, results: distribution || {} });
+    });
+
+    sock.on("question_locked", ({ question_id }) => {
+      dispatch({ type: "updateQuestionStatus", qid: question_id, status: "locked" });
+    });
+
+    sock.on("results_revealed", ({ question_id, results }) => {
+      dispatch({ type: "updateQuestionStatus", qid: question_id, status: "revealed" });
+      dispatch({ type: "setResults", qid: question_id, results: results.distribution || results || {} });
+    });
+
+    sock.on("session_ended", (payload) => {
+      console.info("session_ended", payload);
+    });
+
+    sock.on("error", (payload) => {
+      console.warn("socket error", payload);
+    });
+
+    return () => {
+      sock.off("connect");
+      sock.off("disconnect");
+      sock.off("session_snapshot");
+      sock.off("user_joined");
+      sock.off("new_question");
+      sock.off("answer_received");
+      sock.off("question_locked");
+      sock.off("results_revealed");
+      sock.off("session_ended");
+      sock.off("error");
+      sock.disconnect();
+    };
+  }, [dispatch]);
+
   // When faculty pushes live, auto-advance student to discuss
   useEffectA(() => {
     if (sessionState.activeQuestionId && studentStage === "read") {
-      // don't force  -  just note
+      setStudentStage("discuss");
     }
-  }, [sessionState.activeQuestionId]);
+  }, [sessionState.activeQuestionId, studentStage, setStudentStage]);
 
   // Edit mode bridge
   useEffectA(() => {
